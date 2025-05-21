@@ -595,6 +595,15 @@ int integrate_state_struct
 #ifdef REEBER
     void halo_find(amrex::Real dt,        amrex::Vector<Halo>& reeber_halos);
     void halo_print(amrex::Vector<Halo>& reeber_halos);
+	void SwapEnd(float& val);
+    void writeHaloBinaryVTK(const std::string& filename_vtk,
+                            const amrex::Vector<Halo>& reeber_halos,
+                            const Real& radius_outer,
+                            const Real& radius_inner);
+    void writeHaloSimpleBinary(const std::string& filename_bin,
+                            const amrex::Vector<Halo>& reeber_halos,
+                            const Real& radius_outer,
+                            const Real& radius_inner);
 #endif
     void agn_halo_find(amrex::Real dt);
     void agn_halo_merge();
@@ -986,6 +995,9 @@ protected:
     // There can be only one forcing object (Fourier space):
     static class StochasticForcing *forcing;
 
+    static amrex::Real lightcone_start_z;
+    static amrex::Real lightcone_end_z;
+
 #ifdef REEBER
   //
   // Threshold for halo to create SMBH
@@ -996,6 +1008,10 @@ protected:
   // Seed mass of SMBH
   //
   static amrex::Real mass_seed;
+
+  static int min_halo_n_cells;
+  static amrex::Real halo_component_threshold;
+  static amrex::Real halo_extrema_threshold;
 #endif
 
   // Previous maximum number of steps for sundials
