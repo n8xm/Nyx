@@ -1070,7 +1070,7 @@ Nyx::forcing_check_point (const std::string& dir)
 int
 Nyx::updateInSitu ()
 {
-#if defined(BL_USE_SENSEI_INSITU) || defined(AMREX_USE_ASCENT)
+#if defined(BL_USE_SENSEI_INSITU) || defined(AMREX_USE_ASCENT) || defined(REEBER)
     BL_PROFILE("Nyx::UpdateInSitu()");
 
 #if defined(BL_USE_SENSEI_INSITU)

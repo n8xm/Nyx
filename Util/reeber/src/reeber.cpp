@@ -395,7 +395,8 @@ std::vector<Halo> compute_halos(diy::mpi::communicator& world,
                                 diy::DiscreteBounds diy_domain,
                                 Real absolute_rho,
                                 bool negate,
-                                Real min_halo_n_cells)
+                                Real min_halo_n_cells,
+                                Real halo_extrema_threshold)
 {
     bool debug = false; //world.rank() == 0;
     std::string prefix = "./DIY.XXXXXX";
@@ -467,9 +468,9 @@ std::vector<Halo> compute_halos(diy::mpi::communicator& world,
 
     }
 
-    master.foreach([](Block* b, const diy::Master::ProxyWithLink& cp) {
+    master.foreach([halo_extrema_threshold](Block* b, const diy::Master::ProxyWithLink& cp) {
         b->compute_final_connected_components();
-        b->compute_local_integral();
+        b->compute_local_integral(halo_extrema_threshold);
     });
 
     //if (debug) fmt::print(std::cerr, "Local integrals computed");
@@ -598,9 +599,7 @@ void Nyx::runReeberAnalysis(Vector<MultiFab*>& new_state,
 
     diy::DiscreteBounds diy_domain(3);
 
-    // TODO: take rho, min_halo_n_cells as parameters
-    Real min_halo_n_cells = 10;
-    Real rho = 81.66;
+	Real rho = halo_component_threshold;
 
     Real absolute_rho = (Nyx::average_dm_density + Nyx::average_gas_density) * rho;
     bool negate = true;  // sweep superlevel sets, highest density = root
@@ -619,7 +618,7 @@ void Nyx::runReeberAnalysis(Vector<MultiFab*>& new_state,
 
     BL_PROFILE_VAR("Nyx::runReeberAnalysis()::compute_halos",compute_halos_var);
 
-    reeber_halos = compute_halos(world, master_reader, geom_in, threads, diy_domain, absolute_rho, negate, min_halo_n_cells);
+    reeber_halos = compute_halos(world, master_reader, geom_in, threads, diy_domain, absolute_rho, negate, min_halo_n_cells, halo_extrema_threshold);
     if (verbose and world.rank() == 0) fmt::print(std::cerr, "compute_halos finished, result.size = {}\n", reeber_halos.size());
 
     BL_PROFILE_VAR_STOP(compute_halos_var);
