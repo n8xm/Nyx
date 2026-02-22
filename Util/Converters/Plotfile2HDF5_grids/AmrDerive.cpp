@@ -307,8 +307,9 @@ Write the only component in the multifab to the dataset given by field_name.
 Uses hdf5-parallel.
 */
 void output_write_field(const std::string file_path, const std::string field_path,
- MultiFab &mf) {
+  MultiFab &mf) {
 
+#ifdef AMREX_USE_MPI
     MPI_Comm comm = MPI_COMM_WORLD;
     MPI_Info info = MPI_INFO_NULL;
     int mpi_rank;
@@ -317,6 +318,10 @@ void output_write_field(const std::string file_path, const std::string field_pat
     // Create the file access prop list.
     hid_t pa_plist = H5Pcreate(H5P_FILE_ACCESS);
     H5Pset_fapl_mpio(pa_plist, comm, info);
+#else
+    int mpi_rank = 0;
+    hid_t pa_plist = H5Pcreate(H5P_FILE_ACCESS);
+#endif
 
     // Open the file, and the group.
     hid_t file = H5Fopen(file_path.c_str(), H5F_ACC_RDWR, pa_plist);
@@ -325,8 +330,12 @@ void output_write_field(const std::string file_path, const std::string field_pat
 
     // Make sure the dataset is there.
     if (dataset < 0) {
+#ifdef AMREX_USE_MPI
         printf("Error on rank %i: Could not find dataset %s.\n", mpi_rank,
            field_path.c_str());
+#else
+        printf("Error: Could not find dataset %s.\n", field_path.c_str());
+#endif
         exit(1);
     }
 
@@ -334,8 +343,10 @@ void output_write_field(const std::string file_path, const std::string field_pat
     hid_t file_dataspace = H5Dget_space(dataset);
 
     // Create collective io prop list.
+#ifdef AMREX_USE_MPI
     hid_t collective_plist = H5Pcreate(H5P_DATASET_XFER);
     H5Pset_dxpl_mpio(collective_plist, H5FD_MPIO_COLLECTIVE);
+#endif
 
     // Iterate over Fabs, select matching hyperslab and write.
     hid_t status;
@@ -395,26 +406,40 @@ void output_write_field(const std::string file_path, const std::string field_pat
 
         // Select the hyperslab matching this fab.
         status = H5Sselect_hyperslab(file_dataspace, H5S_SELECT_SET,
-         slab_offsets, NULL, slab_dims, NULL);
+          slab_offsets, NULL, slab_dims, NULL);
         if (status < 0) {
+#ifdef AMREX_USE_MPI
             printf("Error on rank %i: could not select hyperslab.\n", mpi_rank);
+#else
+            printf("Error: could not select hyperslab.\n");
+#endif
             exit(1);
         }
 
         // Write this pencil.
+#ifdef AMREX_USE_MPI
         status = H5Dwrite(dataset, H5T_NATIVE_DOUBLE, slab_dataspace,
           file_dataspace, collective_plist, h5_data);
         if (status < 0) {
             printf("Error on rank %i: could not write hyperslab.\n", mpi_rank);
             exit(1);
         }
-
+#else
+        status = H5Dwrite(dataset, H5T_NATIVE_DOUBLE, slab_dataspace,
+          file_dataspace, H5P_DEFAULT, h5_data);
+        if (status < 0) {
+            printf("Error: could not write hyperslab.\n");
+            exit(1);
+        }
+#endif
         H5Sclose(slab_dataspace);
         write_count++;
     }
 
     // Close HDF5 resources.
+#ifdef AMREX_USE_MPI
     H5Pclose(collective_plist);
+#endif
     H5Sclose(file_dataspace);
     H5Dclose(dataset);
     H5Fclose(file);
@@ -439,6 +464,7 @@ size_t proc_status_value(const std::string& field) {
 
 
 void printHWM(const char* info, MPI_Comm comm) {
+#ifdef AMREX_USE_MPI
     int io_rank=0, mpi_size, mpi_rank;
     MPI_Comm_size(comm, &mpi_size);
     MPI_Comm_rank(comm, &mpi_rank);
@@ -454,19 +480,27 @@ void printHWM(const char* info, MPI_Comm comm) {
         printf("%s: Max = %zu, Min = %zu, Average = %zu\n", info, max_hwm, min_hwm, avg_hwm/mpi_size);
         fflush(stdout);
     }
+#else
+    size_t hwm = proc_status_value("VmRSS");
+    printf("%s: RSS = %zu\n", info, hwm);
+    fflush(stdout);
+#endif
 }
 
 
 int main(int argc, char **argv) {
     amrex::Initialize(argc, argv);
 
-    // MPI info...
+#ifdef AMREX_USE_MPI
     MPI_Comm comm = MPI_COMM_WORLD;
     int mpi_size, mpi_rank;
     MPI_Comm_size(comm, &mpi_size);
     MPI_Comm_rank(comm, &mpi_rank);
-
     CHK(printHWM("Start", comm));
+#else
+    const int mpi_size = 1;
+    const int mpi_rank = 0;
+#endif
 
     //
     // Parameter parsing
@@ -684,6 +718,7 @@ int main(int argc, char **argv) {
     }
 
     // Check if we can split along x evenly.
+#ifdef AMREX_USE_MPI
     if (grid_nx % mpi_size != 0) {
         if (ParallelDescriptor::IOProcessor()) {
             printf("ERROR: domain decomposition.\n");
@@ -692,8 +727,8 @@ int main(int argc, char **argv) {
         MPI_Barrier(comm);
         amrex::Finalize();
     }
-
-    int chunk_size = grid_nx / mpi_size;
+#endif
+    const int chunk_size = grid_nx / mpi_size;
 
     // The box for z-pencils
     Box bx_pencil(amrData.ProbDomain()[0]);
@@ -729,7 +764,11 @@ int main(int argc, char **argv) {
     int level = 0;
     int comp_start = 0;
 
+#ifdef AMREX_USE_MPI
     DistributionMapping dmap(ba, ParallelDescriptor::NProcs());
+#else
+    DistributionMapping dmap(ba, 1);
+#endif
 
     MultiFab mf1(ba, dmap, num_comps, ng);
     MultiFab mf2(ba, dmap, num_comps, ng);
@@ -753,9 +792,13 @@ int main(int argc, char **argv) {
             omega_b, omega_m, omega_l, h, z);
     }
 
+#ifdef AMREX_USE_MPI
     ParallelDescriptor::Barrier();
+#endif
     Print() << "Before reads allocation in Fabs: " << TotalBytesAllocatedInFabs()/(1024*1024.) << " Mb." << std::endl;
+#ifdef AMREX_USE_MPI
     CHK(printHWM("Before read/write", comm));
+#endif
 
     //
     // Dark matter particles, always present
@@ -930,7 +973,9 @@ int main(int argc, char **argv) {
         mf1.mult(1.0e5);
         ParallelDescriptor::Barrier();
         output_write_field(output_path, field_path, mf1);
+#ifdef AMREX_USE_MPI
         ParallelDescriptor::Barrier();
+#endif
 
         field_path = "native_fields/velocity_y";
 
@@ -952,7 +997,9 @@ int main(int argc, char **argv) {
         mf1.mult(1.0e5);
         ParallelDescriptor::Barrier();
         output_write_field(output_path, field_path, mf1);
+#ifdef AMREX_USE_MPI
         ParallelDescriptor::Barrier();
+#endif
 
         field_path = "native_fields/velocity_z";
 
@@ -974,7 +1021,9 @@ int main(int argc, char **argv) {
         mf1.mult(1.0e5);
         ParallelDescriptor::Barrier();
         output_write_field(output_path, field_path, mf1);
+#ifdef AMREX_USE_MPI
         ParallelDescriptor::Barrier();
+#endif
 
         field_path = "native_fields/temperature";
 
@@ -992,7 +1041,9 @@ int main(int argc, char **argv) {
         }
         ParallelDescriptor::Barrier();
         output_write_field(output_path, field_path, mf1);
+#ifdef AMREX_USE_MPI
         ParallelDescriptor::Barrier();
+#endif
     }
 
     //
@@ -1030,11 +1081,15 @@ int main(int argc, char **argv) {
         }
         ParallelDescriptor::Barrier();
         output_write_field(output_path, field_path, mf1);
+#ifdef AMREX_USE_MPI
         ParallelDescriptor::Barrier();
+#endif
     }
 
     Print() << "End allocation in Fabs: " << TotalBytesAllocatedInFabs()/(1024*1024.) << " Mb." << std::endl;
 
+#ifdef AMREX_USE_MPI
     amrex::Finalize();
+#endif
     return 0;
 }
